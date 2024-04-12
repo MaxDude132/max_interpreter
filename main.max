@@ -1,17 +1,3 @@
-myFunc {
-    test = "Hello World"
-
-    -- innerFunc: string test {
-    --     print test
-    -- }
+myFunc: string test {
+    print test
 }
-
-max = 2
-
-if max {
-    print "Hello"
-} else {
-    print "World"
-}
-
-print myFunc

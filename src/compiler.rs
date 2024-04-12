@@ -249,7 +249,7 @@ impl Compiler {
                 } else if get_parser().peek_next().r#type != TokenType::Identifier {
                     get_parser().error_at_next("Expect variable name.");
                 }
-                self.variable_assignment();
+                compiler.variable_assignment();
                 if !get_parser().match_token(TokenType::Comma) {
                     break;
                 }
@@ -273,8 +273,16 @@ impl Compiler {
 
         let var_name_register = self.parse_variable("Expect variable name.", var_type);
 
+        println!(
+            "{:?} - {:?} - {:?}",
+            var_name_register,
+            var_type,
+            get_parser().previous.lexeme
+        );
         if get_parser().match_token(TokenType::Equal) {
             self.expression();
+        } else {
+            self.emit_constant(var_type.get_none_type());
         }
 
         self.set_variable(var_name_register);

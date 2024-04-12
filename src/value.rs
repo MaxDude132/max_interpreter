@@ -7,12 +7,17 @@ use crate::object::ObjFunction;
 #[derive(Debug, Clone)]
 pub enum Value {
     Float(f64),
+    FloatNone,
     Integer(i64),
+    IntegerNone,
     String(String),
+    StringNone,
     None,
     True,
-    ObjFunction(ObjFunction),
     False,
+    BoolNone,
+    ObjFunction(ObjFunction),
+    ObjFunctionNone,
 }
 
 impl Value {
@@ -28,7 +33,7 @@ impl Value {
 
     pub fn is_number(&self) -> bool {
         match self {
-            Value::Float(_) | Value::Integer(_) => true,
+            Value::Float(_) | Value::Integer(_) | Value::FloatNone | Value::IntegerNone => true,
             _ => false,
         }
     }
@@ -42,6 +47,11 @@ impl Value {
             Value::String(_) => "string".to_owned(),
             Value::ObjFunction(_) => "function".to_owned(),
             Value::None => "none".to_owned(),
+            Value::IntegerNone => "int.none".to_owned(),
+            Value::FloatNone => "float.none".to_owned(),
+            Value::StringNone => "string.none".to_owned(),
+            Value::BoolNone => "bool.none".to_owned(),
+            Value::ObjFunctionNone => "function.none".to_owned(),
         }
     }
 }
@@ -56,6 +66,11 @@ impl Display for Value {
             Value::False => write!(f, "false"),
             Value::ObjFunction(n) => write!(f, "{}", n),
             Value::None => write!(f, "none"),
+            Value::IntegerNone => write!(f, "int.none"),
+            Value::FloatNone => write!(f, "float.none"),
+            Value::StringNone => write!(f, "string.none"),
+            Value::BoolNone => write!(f, "bool.none"),
+            Value::ObjFunctionNone => write!(f, "function.none"),
         }
     }
 }

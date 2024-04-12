@@ -84,18 +84,22 @@ impl TokenType {
         match self {
             TokenType::TypeFloat => match value {
                 Value::Float(_) => true,
+                Value::FloatNone => true,
                 _ => false,
             },
             TokenType::TypeInt => match value {
                 Value::Integer(_) => true,
+                Value::IntegerNone => true,
                 _ => false,
             },
             TokenType::TypeString => match value {
                 Value::String(_) => true,
+                Value::StringNone => true,
                 _ => false,
             },
             TokenType::TypeBool => match value {
                 Value::True | Value::False => true,
+                Value::BoolNone => true,
                 _ => false,
             },
             TokenType::TypeFunction => match value {
@@ -104,6 +108,16 @@ impl TokenType {
             },
             TokenType::None => true,
             _ => false,
+        }
+    }
+
+    pub fn get_none_type(&self) -> Value {
+        match self {
+            TokenType::TypeFloat => Value::FloatNone,
+            TokenType::TypeInt => Value::IntegerNone,
+            TokenType::TypeString => Value::StringNone,
+            TokenType::TypeBool => Value::BoolNone,
+            _ => Value::None,
         }
     }
 }
