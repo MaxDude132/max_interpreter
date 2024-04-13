@@ -31,6 +31,7 @@ pub enum OpCode {
     OpJumpIfFalse,
     OpJump,
     OpLoop,
+    OpCall,
     Number(usize),
 }
 
@@ -219,6 +220,10 @@ impl Chunk {
             }
             OpCode::OpLoop => {
                 self.byte_instruction("OP_LOOP", index);
+                1
+            }
+            OpCode::OpCall => {
+                self.byte_instruction("OP_CALL", index);
                 1
             }
             _ => panic!(

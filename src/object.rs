@@ -1,20 +1,20 @@
 use std::fmt::Display;
 
-use crate::chunk::Chunk;
+use crate::{chunk::Chunk, scanner::TokenType};
 
 #[derive(Debug, Clone)]
 pub struct ObjFunction {
-    pub arity: u8,
     pub name: String,
     pub chunk: Chunk,
+    pub function_info: FunctionInfo,
 }
 
 impl ObjFunction {
     pub fn new() -> ObjFunction {
         ObjFunction {
-            arity: 0,
             name: String::new(),
             chunk: Chunk::new(),
+            function_info: FunctionInfo::new(String::new()),
         }
     }
 
@@ -31,5 +31,22 @@ impl Display for ObjFunction {
             "<script>"
         };
         write!(f, "<function {}>", name)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionInfo {
+    pub name: String,
+    pub arg_names: Vec<String>,
+    pub arg_types: Vec<TokenType>,
+}
+
+impl FunctionInfo {
+    pub fn new(name: String) -> FunctionInfo {
+        FunctionInfo {
+            name,
+            arg_names: Vec::new(),
+            arg_types: Vec::new(),
+        }
     }
 }

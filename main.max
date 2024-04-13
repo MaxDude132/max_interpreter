@@ -1,3 +1,5 @@
 myFunc: string test {
     print test
 }
+
+myFunc("test", "other_test")

@@ -1,5 +1,5 @@
 use crate::common::DEBUG_TRACE_EXECUTION;
-use crate::compiler::Compiler;
+use crate::compiler::{Compiler, FunctionType};
 use crate::object::ObjFunction;
 use crate::{
     chunk::OpCode,
@@ -38,15 +38,11 @@ struct CallFrame {
 
 pub struct VM {
     frames: Vec<CallFrame>,
-    stack: Vec<Value>,
 }
 
 impl VM {
     pub fn new() -> VM {
-        VM {
-            frames: Vec::new(),
-            stack: Vec::new(),
-        }
+        VM { frames: Vec::new() }
     }
 
     pub fn interpret(&mut self, source: String) -> InterpretResult {
@@ -56,8 +52,6 @@ impl VM {
             eprintln!("Errors were found at compile time.");
             return InterpretResult::CompileError;
         }
-
-        self.stack.push(Value::ObjFunction(function.clone()));
 
         let frame = {
             CallFrame {
@@ -213,6 +207,13 @@ impl VM {
                     let offset = self.read_byte(&mut frame).as_number();
                     frame.ip -= offset;
                 }
+                OpCode::OpCall => {
+                    let arg_count = self.read_byte(&mut frame).as_number();
+                    if !self.call_value(&mut frame, arg_count) {
+                        return InterpretResult::RuntimeError;
+                    }
+                    frame = self.frames.last_mut().unwrap().clone();
+                }
                 _ => {
                     self.runtime_error(&mut frame, &format!("Unknown opcode {:?}", instruction));
                     return InterpretResult::CompileError;
@@ -237,6 +238,30 @@ impl VM {
             OpCode::Number(index) => frame.function.chunk.constants[index].clone(),
             _ => panic!("Expected constant to be a number"),
         }
+    }
+
+    fn call_value(&mut self, frame: &mut CallFrame, arg_count: usize) -> bool {
+        let value = self.peek(frame, arg_count);
+        match value {
+            Value::ObjFunction(function) => {
+                self.call(frame, function);
+                true
+            }
+            _ => {
+                self.runtime_error(frame, "Can only call functions and classes.");
+                false
+            }
+        }
+    }
+
+    fn call(&mut self, frame: &mut CallFrame, function: ObjFunction) {
+        let arg_count = function.function_info.arg_names.len();
+        let new_frame = CallFrame {
+            ip: 0,
+            function,
+            slots: frame.slots.split_off(frame.slots.len() - arg_count),
+        };
+        self.frames.push(new_frame);
     }
 
     fn peek(&self, frame: &CallFrame, distance: usize) -> Value {

@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use crate::{
     chunk::{Chunk, OpCode},
     common::DEBUG_PRINT_CODE,
-    object::ObjFunction,
+    object::{FunctionInfo, ObjFunction},
     scanner::{Scanner, Token, TokenType},
     value::Value,
 };
@@ -13,6 +15,7 @@ use once_cell::sync::Lazy;
 pub struct Parser {
     scanner: Scanner,
     current: Token,
+    previous_2: Token,
     previous: Token,
     next: Token,
     next_2: Token,
@@ -25,6 +28,7 @@ impl Parser {
         Parser {
             scanner: Scanner::new(source),
             current: Token::new(TokenType::Empty, 0),
+            previous_2: Token::new(TokenType::Empty, 0),
             previous: Token::new(TokenType::Empty, 0),
             next: Token::new(TokenType::Empty, 0),
             next_2: Token::new(TokenType::Empty, 0),
@@ -71,6 +75,7 @@ impl Parser {
     }
 
     fn advance(&mut self) {
+        self.previous_2 = self.previous.clone();
         self.previous = self.current.clone();
         self.current = self.next.clone();
         self.next = self.next_2.clone();
@@ -78,7 +83,6 @@ impl Parser {
         loop {
             self.next_2 = self.scanner.scan_token();
             while self.current.r#type == TokenType::Empty {
-                self.previous = self.current.clone();
                 self.current = self.next.clone();
                 self.next = self.next_2.clone();
                 self.next_2 = self.scanner.scan_token();
@@ -100,9 +104,9 @@ impl Parser {
         return true;
     }
 
-    // fn peek_previous(&self) -> Token {
-    //     self.previous.clone()
-    // }
+    fn peek_previous_2(&self) -> Token {
+        self.previous_2.clone()
+    }
 
     fn peek_current(&self) -> Token {
         self.current.clone()
@@ -168,6 +172,7 @@ pub struct Compiler {
     function: ObjFunction,
     function_type: FunctionType,
     locals: Vec<Local>,
+    functions: HashMap<String, FunctionInfo>,
     scope_depth: usize,
 }
 
@@ -177,6 +182,7 @@ impl Compiler {
             function: ObjFunction::new(),
             function_type: FunctionType::Script,
             locals: Vec::new(),
+            functions: HashMap::new(),
             scope_depth: 0,
         }
     }
@@ -241,6 +247,8 @@ impl Compiler {
         compiler.function.name = get_parser().previous.lexeme.clone();
         compiler.begin_scope();
 
+        let mut function_info = FunctionInfo::new(compiler.function.name.clone());
+
         if get_parser().peek_current().r#type == TokenType::Colon {
             get_parser().advance();
             loop {
@@ -249,12 +257,24 @@ impl Compiler {
                 } else if get_parser().peek_next().r#type != TokenType::Identifier {
                     get_parser().error_at_next("Expect variable name.");
                 }
+                function_info
+                    .arg_types
+                    .push(get_parser().current.r#type.clone());
+                function_info
+                    .arg_names
+                    .push(get_parser().peek_next().lexeme.clone());
                 compiler.variable_assignment();
                 if !get_parser().match_token(TokenType::Comma) {
                     break;
                 }
             }
         }
+
+        compiler
+            .functions
+            .insert(compiler.function.name.clone(), function_info.clone());
+
+        compiler.function.function_info = function_info;
 
         get_parser().consume(TokenType::LeftBrace, "Expect '{' before function body.");
         compiler.block();
@@ -273,19 +293,10 @@ impl Compiler {
 
         let var_name_register = self.parse_variable("Expect variable name.", var_type);
 
-        println!(
-            "{:?} - {:?} - {:?}",
-            var_name_register,
-            var_type,
-            get_parser().previous.lexeme
-        );
         if get_parser().match_token(TokenType::Equal) {
             self.expression();
-        } else {
-            self.emit_constant(var_type.get_none_type());
+            self.set_variable(var_name_register);
         }
-
-        self.set_variable(var_name_register);
         self.locals[var_name_register.as_number()].is_initialized = true;
     }
 
@@ -624,6 +635,28 @@ impl Compiler {
         self.patch_jump(end_jump);
     }
 
+    fn call(&mut self, _can_assign: bool) {
+        let arg_count = self.argument_list();
+        self.emit_2_bytes(OpCode::OpCall, OpCode::Number(arg_count));
+    }
+
+    fn argument_list(&mut self) -> usize {
+        let mut arg_count = 0;
+        println!("{:?}", get_parser().peek_previous_2());
+        if !get_parser().check(TokenType::RightParen) {
+            loop {
+                self.expression();
+                arg_count += 1;
+                if !get_parser().match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+
+        get_parser().consume(TokenType::RightParen, "Expect ')' after arguments.");
+        return arg_count;
+    }
+
     fn none(&mut self, _can_assign: bool) {}
 
     fn get_rule(&self, r#type: TokenType) -> ParseRule {
@@ -659,9 +692,9 @@ impl Compiler {
                 infix: Compiler::none,
             },
             TokenType::LeftParen => ParseRule {
-                precedence: Precedence::None,
+                precedence: Precedence::Call,
                 prefix: Compiler::grouping,
-                infix: Compiler::none,
+                infix: Compiler::call,
             },
             TokenType::Minus => ParseRule {
                 precedence: Precedence::Term,
