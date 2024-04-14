@@ -47,11 +47,11 @@ impl Value {
             Value::String(_) => "string".to_owned(),
             Value::ObjFunction(_) => "function".to_owned(),
             Value::None => "none".to_owned(),
-            Value::IntegerNone => "int.none".to_owned(),
-            Value::FloatNone => "float.none".to_owned(),
-            Value::StringNone => "string.none".to_owned(),
-            Value::BoolNone => "bool.none".to_owned(),
-            Value::ObjFunctionNone => "function.none".to_owned(),
+            Value::IntegerNone => "none".to_owned(),
+            Value::FloatNone => "none".to_owned(),
+            Value::StringNone => "none".to_owned(),
+            Value::BoolNone => "none".to_owned(),
+            Value::ObjFunctionNone => "none".to_owned(),
         }
     }
 }

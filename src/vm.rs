@@ -7,15 +7,15 @@ use crate::{
 };
 
 macro_rules! binary_op {
-    ($frame:expr, $vm:expr, $operator:tt) => {
+    ($vm:expr, $operator:tt) => {
         {
-            let b = $frame.slots.pop().unwrap();
-            let a = $frame.slots.pop().unwrap();
+            let b = $vm.current_frame().slots.pop().unwrap();
+            let a = $vm.current_frame().slots.pop().unwrap();
             let val = a $operator b;
             match val {
-                Ok(val) => $frame.slots.push(val),
+                Ok(val) => $vm.current_frame().slots.push(val),
                 Err(message) => {
-                    $vm.runtime_error($frame, &message);
+                    $vm.runtime_error(&message);
                     return InterpretResult::RuntimeError;
                 }
             }
@@ -29,7 +29,7 @@ pub enum InterpretResult {
     RuntimeError,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct CallFrame {
     ip: usize,
     function: ObjFunction,
@@ -67,11 +67,15 @@ impl VM {
         return result;
     }
 
+    fn current_frame(&mut self) -> &mut CallFrame {
+        self.frames.last_mut().unwrap()
+    }
+
     fn run(&mut self) -> InterpretResult {
-        let mut frame = self.frames.last_mut().unwrap().clone();
         loop {
-            let instruction = self.read_byte(&mut frame);
+            let instruction = self.read_byte();
             if DEBUG_TRACE_EXECUTION {
+                let frame = self.current_frame();
                 frame
                     .function
                     .chunk
@@ -80,149 +84,168 @@ impl VM {
 
             match instruction {
                 OpCode::OpConstant => {
-                    let constant = self.read_constant(&mut frame);
-                    frame.slots.push(constant);
+                    let constant = self.read_constant();
+                    self.current_frame().slots.push(constant);
                 }
-                OpCode::OpAdd => binary_op!(&mut frame, self, +),
-                OpCode::OpSubtract => binary_op!(&mut frame, self, -),
-                OpCode::OpMultiply => binary_op!(&mut frame, self, *),
-                OpCode::OpDivide => binary_op!(&mut frame, self, /),
+                OpCode::OpAdd => binary_op!(self, +),
+                OpCode::OpSubtract => binary_op!(self, -),
+                OpCode::OpMultiply => binary_op!(self, *),
+                OpCode::OpDivide => binary_op!(self, /),
                 OpCode::OpEqual => {
-                    let b = frame.slots.pop().unwrap();
-                    let a = frame.slots.pop().unwrap();
-                    frame
-                        .slots
-                        .push(if a == b { Value::True } else { Value::False });
+                    let b = self.current_frame().slots.pop().unwrap();
+                    let a = self.current_frame().slots.pop().unwrap();
+                    self.current_frame().slots.push(if a == b {
+                        Value::True
+                    } else {
+                        Value::False
+                    });
                 }
                 OpCode::OpNotEqual => {
-                    let b = frame.slots.pop().unwrap();
-                    let a = frame.slots.pop().unwrap();
-                    frame
-                        .slots
-                        .push(if a != b { Value::True } else { Value::False });
+                    let b = self.current_frame().slots.pop().unwrap();
+                    let a = self.current_frame().slots.pop().unwrap();
+                    self.current_frame().slots.push(if a != b {
+                        Value::True
+                    } else {
+                        Value::False
+                    });
                 }
                 OpCode::OpGreater => {
-                    let b = frame.slots.pop().unwrap();
-                    let a = frame.slots.pop().unwrap();
-                    frame
+                    let b = self.current_frame().slots.pop().unwrap();
+                    let a = self.current_frame().slots.pop().unwrap();
+                    self.current_frame()
                         .slots
                         .push(if a > b { Value::True } else { Value::False });
                 }
                 OpCode::OpGreaterEqual => {
-                    let b = frame.slots.pop().unwrap();
-                    let a = frame.slots.pop().unwrap();
-                    frame
-                        .slots
-                        .push(if a >= b { Value::True } else { Value::False });
+                    let b = self.current_frame().slots.pop().unwrap();
+                    let a = self.current_frame().slots.pop().unwrap();
+                    self.current_frame().slots.push(if a >= b {
+                        Value::True
+                    } else {
+                        Value::False
+                    });
                 }
                 OpCode::OpLess => {
-                    let b = frame.slots.pop().unwrap();
-                    let a = frame.slots.pop().unwrap();
-                    frame
+                    let b = self.current_frame().slots.pop().unwrap();
+                    let a = self.current_frame().slots.pop().unwrap();
+                    self.current_frame()
                         .slots
                         .push(if a < b { Value::True } else { Value::False });
                 }
                 OpCode::OpLessEqual => {
-                    let b = frame.slots.pop().unwrap();
-                    let a = frame.slots.pop().unwrap();
-                    frame
-                        .slots
-                        .push(if a <= b { Value::True } else { Value::False });
+                    let b = self.current_frame().slots.pop().unwrap();
+                    let a = self.current_frame().slots.pop().unwrap();
+                    self.current_frame().slots.push(if a <= b {
+                        Value::True
+                    } else {
+                        Value::False
+                    });
                 }
                 OpCode::OpNot => {
-                    let value = frame.slots.pop().unwrap();
-                    frame.slots.push(!value);
+                    let value = self.current_frame().slots.pop().unwrap();
+                    self.current_frame().slots.push(!value);
                 }
-                OpCode::OpTrue => frame.slots.push(Value::True),
-                OpCode::OpFalse => frame.slots.push(Value::False),
-                OpCode::OpNone => frame.slots.push(Value::None),
+                OpCode::OpTrue => self.current_frame().slots.push(Value::True),
+                OpCode::OpFalse => self.current_frame().slots.push(Value::False),
+                OpCode::OpNone => self.current_frame().slots.push(Value::None),
                 OpCode::OpPrint => {
-                    print_value(frame.slots.pop().unwrap());
+                    print_value(self.current_frame().slots.pop().unwrap());
                     println!();
                 }
                 OpCode::OpNegate => {
-                    if !self.peek(&frame, 0).is_number() {
-                        self.runtime_error(&mut frame, "Operand must be a number.");
+                    if !self.peek(0).is_number() {
+                        self.runtime_error("Operand must be a number.");
                         return InterpretResult::RuntimeError;
                     }
-                    let value = frame.slots.pop().unwrap();
-                    frame.slots.push(-value);
+                    let value = self.current_frame().slots.pop().unwrap();
+                    self.current_frame().slots.push(-value);
                 }
                 OpCode::OpEof => {
                     return InterpretResult::Ok;
                 }
                 OpCode::OpEol => (),
                 OpCode::OpSet => {
-                    let slot = self.read_byte(&mut frame);
+                    let slot = self.read_byte();
                     match slot {
                         OpCode::Number(slot) => {
                             if slot == usize::MAX {
-                                self.runtime_error(&mut frame, &format!("Variable with this name already declared in the global scope.\nGlobal variables cannot be edited from a scope."));
+                                self.runtime_error( &format!("Variable with this name already declared in the global scope.\nGlobal variables cannot be edited from a scope."));
                                 return InterpretResult::RuntimeError;
                             }
-                            frame.slots[slot as usize] = frame.slots.last().unwrap().clone();
+                            self.current_frame().slots[slot as usize] =
+                                self.current_frame().slots.last().unwrap().clone();
                         }
                         _ => {
-                            self.runtime_error(&mut frame, &format!("Unknown opcode {:?}", slot));
+                            self.runtime_error(&format!("Unknown opcode {:?}", slot));
                             return InterpretResult::CompileError;
                         }
                     }
                 }
                 OpCode::OpGet => {
-                    let slot = self.read_byte(&mut frame);
+                    let slot = self.read_byte();
                     match slot {
                         OpCode::Number(slot) => {
                             if slot == usize::MAX {
-                                self.runtime_error(&mut frame, &format!("Undefined variable."));
+                                self.runtime_error(&format!("Undefined variable."));
                                 return InterpretResult::RuntimeError;
                             }
+                            let frame = self.current_frame();
                             frame.slots.push(frame.slots[slot as usize].clone());
                         }
                         _ => {
-                            self.runtime_error(&mut frame, &format!("Unknown opcode {:?}", slot));
+                            self.runtime_error(&format!("Unknown opcode {:?}", slot));
                             return InterpretResult::CompileError;
                         }
                     }
                 }
                 OpCode::OpPop => {
-                    frame.slots.pop();
+                    self.current_frame().slots.pop();
                 }
                 OpCode::OpJumpIfTrue => {
-                    let offset = self.read_byte(&mut frame).as_number();
-                    if self.peek(&frame, 0).is_truthy() {
-                        frame.ip += offset;
+                    let offset = self.read_byte().as_number();
+                    if self.peek(0).is_truthy() {
+                        self.current_frame().ip += offset;
                     }
                 }
                 OpCode::OpJumpIfFalse => {
-                    let offset = self.read_byte(&mut frame).as_number();
-                    if !self.peek(&frame, 0).is_truthy() {
-                        frame.ip += offset;
+                    let offset = self.read_byte().as_number();
+                    if !self.peek(0).is_truthy() {
+                        self.current_frame().ip += offset;
                     }
                 }
                 OpCode::OpJump => {
-                    let offset = self.read_byte(&mut frame).as_number();
-                    frame.ip += offset;
+                    let offset = self.read_byte().as_number();
+                    self.current_frame().ip += offset;
                 }
                 OpCode::OpLoop => {
-                    let offset = self.read_byte(&mut frame).as_number();
-                    frame.ip -= offset;
+                    let offset = self.read_byte().as_number();
+                    self.current_frame().ip -= offset;
                 }
                 OpCode::OpCall => {
-                    let arg_count = self.read_byte(&mut frame).as_number();
-                    if !self.call_value(&mut frame, arg_count) {
+                    let arg_count = self.read_byte().as_number();
+                    if !self.call_value(arg_count) {
                         return InterpretResult::RuntimeError;
                     }
-                    frame = self.frames.last_mut().unwrap().clone();
+                }
+                OpCode::OpReturn => {
+                    let result = self.current_frame().slots.pop().unwrap();
+                    self.frames.pop();
+                    if self.frames.is_empty() {
+                        return InterpretResult::Ok;
+                    }
+                    self.current_frame().slots.push(result);
                 }
                 _ => {
-                    self.runtime_error(&mut frame, &format!("Unknown opcode {:?}", instruction));
+                    self.runtime_error(&format!("Unknown opcode {:?}", instruction));
                     return InterpretResult::CompileError;
                 }
             }
         }
     }
 
-    fn read_byte(&mut self, frame: &mut CallFrame) -> OpCode {
+    fn read_byte(&mut self) -> OpCode {
+        let frame = self.current_frame();
+
         if frame.ip >= frame.function.chunk.code.len() {
             todo!("Handle this error");
         }
@@ -232,48 +255,73 @@ impl VM {
         byte
     }
 
-    fn read_constant(&mut self, frame: &mut CallFrame) -> Value {
-        let constant = self.read_byte(frame);
+    fn read_constant(&mut self) -> Value {
+        let constant = self.read_byte();
         match constant {
-            OpCode::Number(index) => frame.function.chunk.constants[index].clone(),
+            OpCode::Number(index) => self.current_frame().function.chunk.constants[index].clone(),
             _ => panic!("Expected constant to be a number"),
         }
     }
 
-    fn call_value(&mut self, frame: &mut CallFrame, arg_count: usize) -> bool {
-        let value = self.peek(frame, arg_count);
+    fn call_value(&mut self, arg_count: usize) -> bool {
+        let value = self.peek(arg_count);
         match value {
             Value::ObjFunction(function) => {
-                self.call(frame, function);
+                self.call(function);
                 true
             }
             _ => {
-                self.runtime_error(frame, "Can only call functions and classes.");
+                self.runtime_error(&format!(
+                    "Can only call functions and classes. Got {:?} instead.",
+                    value
+                ));
                 false
             }
         }
     }
 
-    fn call(&mut self, frame: &mut CallFrame, function: ObjFunction) {
+    fn call(&mut self, function: ObjFunction) {
+        let frame = self.current_frame();
+
         let arg_count = function.function_info.arg_names.len();
+        let at = frame.slots.len() - arg_count;
+
+        let mut new_slots = frame.slots[0..frame.function.functions_count].to_vec();
+        new_slots.extend(frame.slots.split_off(at));
+
         let new_frame = CallFrame {
             ip: 0,
             function,
-            slots: frame.slots.split_off(frame.slots.len() - arg_count),
+            slots: new_slots,
         };
         self.frames.push(new_frame);
     }
 
-    fn peek(&self, frame: &CallFrame, distance: usize) -> Value {
+    fn peek(&mut self, distance: usize) -> Value {
+        let frame = self.current_frame();
         frame.slots[frame.slots.len() - distance - 1].clone()
     }
 
-    fn runtime_error(&self, frame: &mut CallFrame, message: &str) {
+    fn runtime_error(&mut self, message: &str) {
+        let frame = self.current_frame();
+
         eprintln!();
         eprintln!("{}", message);
         eprintln!(
             "[line {}] in script",
             frame.function.chunk.get_line(frame.ip - 1)
         );
+
+        // for i in (0..self.frames.len()).rev() {
+        //     let frame = &self.frames[i];
+        //     let line = frame.function.chunk.get_line(frame.ip);
+        //     eprint!("[line {}] in ", line);
+        //     if !frame.function.name.is_empty() {
+        //         eprint!("function {}", frame.function.name);
+        //     } else {
+        //         eprint!("script");
+        //     }
+        //     eprintln!();
+        // }
     }
 }

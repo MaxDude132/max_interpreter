@@ -1,5 +1,17 @@
 myFunc: string test {
     print test
+    otherFunc()
 }
 
-myFunc("test", "other_test")
+otherFunc {
+    print 3
+}
+
+test = "Bonjour Camille!"
+count = 0
+{
+    while count < 10 {
+        myFunc(test)
+        count = count + 1
+    }
+}

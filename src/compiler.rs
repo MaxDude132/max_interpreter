@@ -45,6 +45,10 @@ impl Parser {
         self.error_at(&self.previous.clone(), message);
     }
 
+    fn error_at_previous_2(&mut self, message: &str) {
+        self.error_at(&self.previous_2.clone(), message);
+    }
+
     fn error_at_next(&mut self, message: &str) {
         self.error_at(&self.next.clone(), message);
     }
@@ -123,6 +127,17 @@ impl Parser {
     fn check(&self, r#type: TokenType) -> bool {
         self.current.r#type == r#type
     }
+
+    fn reset(&mut self) {
+        self.scanner.reset();
+        self.previous_2 = Token::new(TokenType::Empty, 0);
+        self.previous = Token::new(TokenType::Empty, 0);
+        self.current = Token::new(TokenType::Empty, 0);
+        self.next = Token::new(TokenType::Empty, 0);
+        self.next_2 = Token::new(TokenType::Empty, 0);
+        self.had_error = false;
+        self.panic_mode = false;
+    }
 }
 
 static mut PARSER: Lazy<Parser> = Lazy::new(|| Parser::new(String::new()));
@@ -173,6 +188,7 @@ pub struct Compiler {
     function_type: FunctionType,
     locals: Vec<Local>,
     functions: HashMap<String, FunctionInfo>,
+    values: HashMap<String, Value>,
     scope_depth: usize,
 }
 
@@ -183,6 +199,7 @@ impl Compiler {
             function_type: FunctionType::Script,
             locals: Vec::new(),
             functions: HashMap::new(),
+            values: HashMap::new(),
             scope_depth: 0,
         }
     }
@@ -200,6 +217,14 @@ impl Compiler {
 
         self.start_compiler();
 
+        // First pass to initialize functions so that their order does not matter
+        // Function header analysis is also done here
+        while !get_parser().match_token(TokenType::Eof) {
+            self.globals_declaration();
+        }
+
+        get_parser().reset();
+
         while !get_parser().match_token(TokenType::Eof) {
             self.declaration();
         }
@@ -210,6 +235,21 @@ impl Compiler {
             self.current_chunk().had_error = true;
         }
         return self.function.clone();
+    }
+
+    fn globals_declaration(&mut self) {
+        if get_parser().peek_current().r#type == TokenType::Identifier
+            && (get_parser().peek_next().r#type == TokenType::Colon
+                || get_parser().peek_next().r#type == TokenType::LeftBrace)
+        {
+            self.function_declaration();
+        } else {
+            get_parser().advance();
+        }
+
+        if get_parser().panic_mode {
+            self.synchronize();
+        }
     }
 
     fn declaration(&mut self) {
@@ -223,7 +263,7 @@ impl Compiler {
             && (get_parser().peek_next().r#type == TokenType::Colon
                 || get_parser().peek_next().r#type == TokenType::LeftBrace)
         {
-            self.function_declaration();
+            self.function_initialization();
         } else {
             self.statement();
         }
@@ -237,17 +277,9 @@ impl Compiler {
         let var_name_register =
             self.parse_variable("Expect function name.", TokenType::TypeFunction);
         self.locals[var_name_register.as_number()].is_initialized = true;
-        self.function(FunctionType::Function);
-        self.set_variable(var_name_register);
-    }
 
-    fn function(&mut self, function_type: FunctionType) {
-        let mut compiler = Compiler::new();
-        compiler.function_type = function_type;
-        compiler.function.name = get_parser().previous.lexeme.clone();
-        compiler.begin_scope();
-
-        let mut function_info = FunctionInfo::new(compiler.function.name.clone());
+        let function_name = get_parser().previous.lexeme.clone();
+        let mut function_info = FunctionInfo::new(function_name.clone());
 
         if get_parser().peek_current().r#type == TokenType::Colon {
             get_parser().advance();
@@ -259,10 +291,42 @@ impl Compiler {
                 }
                 function_info
                     .arg_types
-                    .push(get_parser().current.r#type.clone());
+                    .push(get_parser().peek_current().r#type.clone());
                 function_info
                     .arg_names
                     .push(get_parser().peek_next().lexeme.clone());
+                get_parser().advance();
+                get_parser().advance();
+                if !get_parser().match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.functions.insert(function_name, function_info.clone());
+        self.function.functions_count += 1;
+    }
+
+    fn function_initialization(&mut self) {
+        let var_name_register =
+            self.parse_variable("Expect function name.", TokenType::TypeFunction);
+        self.function(FunctionType::Function);
+        self.set_variable(var_name_register);
+    }
+
+    fn function(&mut self, function_type: FunctionType) {
+        let mut compiler = Compiler::new();
+        compiler.function_type = function_type;
+        compiler.function.name = get_parser().previous.lexeme.clone();
+        compiler.locals = self.locals.clone();
+        compiler.function.chunk.constants = self.function.chunk.constants.clone();
+        compiler.function.functions_count = self.function.functions_count;
+        compiler.functions = self.functions.clone();
+        compiler.begin_scope();
+
+        if get_parser().peek_current().r#type == TokenType::Colon {
+            get_parser().advance();
+            loop {
                 compiler.variable_assignment();
                 if !get_parser().match_token(TokenType::Comma) {
                     break;
@@ -270,11 +334,8 @@ impl Compiler {
             }
         }
 
-        compiler
-            .functions
-            .insert(compiler.function.name.clone(), function_info.clone());
-
-        compiler.function.function_info = function_info;
+        compiler.function.function_info =
+            self.functions.get(&compiler.function.name).unwrap().clone();
 
         get_parser().consume(TokenType::LeftBrace, "Expect '{' before function body.");
         compiler.block();
@@ -314,14 +375,7 @@ impl Compiler {
 
     fn add_local(&mut self, name: Token, var_type: TokenType) -> usize {
         for i in (0..self.locals.len()).rev() {
-            if self.locals[i].depth == 0
-                && self.scope_depth != 0
-                && name.lexeme == self.locals[i].name.lexeme
-            {
-                get_parser()
-                    .error_at_current(&format!("Variable with name {} already declared in the global scope.\nGlobal variables cannot be edited from a scope.", name.lexeme));
-                return usize::MAX;
-            } else if name.lexeme == self.locals[i].name.lexeme {
+            if name.lexeme == self.locals[i].name.lexeme {
                 return i;
             }
         }
@@ -337,6 +391,7 @@ impl Compiler {
     }
 
     fn set_variable(&mut self, var_name_register: OpCode) {
+        let local = self.locals[var_name_register.as_number()].clone();
         let value;
         match self.immut_current_chunk().constants.last() {
             None => {
@@ -347,9 +402,8 @@ impl Compiler {
                 value = v;
             }
         }
-        let local = self.locals[var_name_register.as_number()].clone();
 
-        if !local.type_.is_correct_type(value) {
+        if !local.type_.is_value_correct_type(value) {
             get_parser().error_at_previous(&format!(
                 "Variable {} is of type {} but value is of type {}",
                 local.name.lexeme,
@@ -357,7 +411,15 @@ impl Compiler {
                 value.type_of()
             ));
         }
+        self.set_value(var_name_register, value.clone());
         self.emit_2_bytes(OpCode::OpSet, var_name_register);
+    }
+
+    fn set_value(&mut self, var_name_register: OpCode, value: Value) {
+        let local = self.locals[var_name_register.as_number()].clone();
+        self.values
+            .entry(local.name.lexeme.clone())
+            .or_insert(value.clone());
     }
 
     fn synchronize(&mut self) {
@@ -578,9 +640,9 @@ impl Compiler {
 
     fn literal(&mut self, _can_assign: bool) {
         match get_parser().previous.r#type {
-            TokenType::True => self.emit_byte(OpCode::OpTrue),
-            TokenType::False => self.emit_byte(OpCode::OpFalse),
-            TokenType::None => self.emit_byte(OpCode::OpNone),
+            TokenType::True => self.emit_constant(Value::True),
+            TokenType::False => self.emit_constant(Value::False),
+            TokenType::None => self.emit_constant(Value::None),
             _ => panic!("Invalid literal type."),
         }
     }
@@ -641,20 +703,75 @@ impl Compiler {
     }
 
     fn argument_list(&mut self) -> usize {
-        let mut arg_count = 0;
-        println!("{:?}", get_parser().peek_previous_2());
+        let mut args = Vec::new();
+        let function_info = self.function_info(get_parser().peek_previous_2().lexeme.clone());
+
         if !get_parser().check(TokenType::RightParen) {
             loop {
+                args.push(get_parser().peek_current());
                 self.expression();
-                arg_count += 1;
                 if !get_parser().match_token(TokenType::Comma) {
                     break;
                 }
             }
         }
 
+        if args.len() != function_info.arg_names.len() {
+            let message: String;
+            if function_info.arg_names.len() == 1 {
+                message = format!(
+                    "Expected {} argument but got {}.",
+                    function_info.arg_names.len(),
+                    args.len()
+                );
+            } else {
+                message = format!(
+                    "Expected {} arguments but got {}.",
+                    function_info.arg_names.len(),
+                    args.len()
+                );
+            }
+            get_parser().error_at_previous(&message);
+        }
+
+        for i in 0..args.len() {
+            if !function_info.arg_types[i].is_token_correct_type(&args[i]) {
+                let value;
+                match self.values.get(&args[i].lexeme) {
+                    None => {
+                        get_parser().error_at_previous(&format!(
+                            "Expected argument of type {} but got argument of type {}.",
+                            function_info.arg_types[i],
+                            &args[i].type_of()
+                        ));
+                        value = Value::None;
+                    }
+                    Some(v) => {
+                        value = v.clone();
+                    }
+                }
+                if !function_info.arg_types[i].is_value_correct_type(&value) {
+                    get_parser().error_at_previous(&format!(
+                        "Expected argument of type {} but got argument of type {}.",
+                        function_info.arg_types[i],
+                        &value.type_of()
+                    ));
+                }
+            }
+        }
+
         get_parser().consume(TokenType::RightParen, "Expect ')' after arguments.");
-        return arg_count;
+        return args.len();
+    }
+
+    fn function_info(&mut self, name: String) -> FunctionInfo {
+        match self.functions.get(&name) {
+            None => {
+                get_parser().error_at_previous_2(&format!("Function {} could not be found.", name));
+                return FunctionInfo::new(String::new());
+            }
+            Some(info) => return info.clone(),
+        }
     }
 
     fn none(&mut self, _can_assign: bool) {}
@@ -687,6 +804,31 @@ impl Compiler {
                 infix: Compiler::none,
             },
             TokenType::None => ParseRule {
+                precedence: Precedence::None,
+                prefix: Compiler::literal,
+                infix: Compiler::none,
+            },
+            TokenType::FloatNone => ParseRule {
+                precedence: Precedence::None,
+                prefix: Compiler::literal,
+                infix: Compiler::none,
+            },
+            TokenType::IntegerNone => ParseRule {
+                precedence: Precedence::None,
+                prefix: Compiler::literal,
+                infix: Compiler::none,
+            },
+            TokenType::StringNone => ParseRule {
+                precedence: Precedence::None,
+                prefix: Compiler::literal,
+                infix: Compiler::none,
+            },
+            TokenType::BoolNone => ParseRule {
+                precedence: Precedence::None,
+                prefix: Compiler::literal,
+                infix: Compiler::none,
+            },
+            TokenType::FunctionNone => ParseRule {
                 precedence: Precedence::None,
                 prefix: Compiler::literal,
                 infix: Compiler::none,
@@ -785,8 +927,9 @@ impl Compiler {
         OpCode::Number(constant)
     }
 
-    fn emit_eof(&mut self) {
-        self.emit_byte(OpCode::OpEof);
+    fn emit_return(&mut self) {
+        self.emit_byte(OpCode::OpNone);
+        self.emit_byte(OpCode::OpReturn);
     }
 
     fn emit_eol(&mut self) {
@@ -798,7 +941,7 @@ impl Compiler {
     }
 
     fn end_compiler(&mut self) -> ObjFunction {
-        self.emit_eof();
+        self.emit_return();
         if DEBUG_PRINT_CODE && !self.current_chunk().had_error {
             let func_name = format!("{}", &self.function);
             self.immut_current_chunk()

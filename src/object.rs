@@ -7,6 +7,7 @@ pub struct ObjFunction {
     pub name: String,
     pub chunk: Chunk,
     pub function_info: FunctionInfo,
+    pub functions_count: usize,
 }
 
 impl ObjFunction {
@@ -15,6 +16,7 @@ impl ObjFunction {
             name: String::new(),
             chunk: Chunk::new(),
             function_info: FunctionInfo::new(String::new()),
+            functions_count: 0,
         }
     }
 

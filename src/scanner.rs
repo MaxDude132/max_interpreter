@@ -43,6 +43,13 @@ pub enum TokenType {
     TypeBool,
     TypeFunction,
 
+    // none types
+    FloatNone,
+    IntegerNone,
+    StringNone,
+    BoolNone,
+    FunctionNone,
+
     // Keywords
     And,
     Class,
@@ -80,30 +87,53 @@ impl TokenType {
         }
     }
 
-    pub fn is_correct_type(&self, value: &Value) -> bool {
+    pub fn is_value_correct_type(&self, value: &Value) -> bool {
         match self {
             TokenType::TypeFloat => match value {
                 Value::Float(_) => true,
-                Value::FloatNone => true,
                 _ => false,
             },
             TokenType::TypeInt => match value {
                 Value::Integer(_) => true,
-                Value::IntegerNone => true,
                 _ => false,
             },
             TokenType::TypeString => match value {
                 Value::String(_) => true,
-                Value::StringNone => true,
                 _ => false,
             },
             TokenType::TypeBool => match value {
                 Value::True | Value::False => true,
-                Value::BoolNone => true,
                 _ => false,
             },
             TokenType::TypeFunction => match value {
                 Value::ObjFunction(_) => true,
+                _ => false,
+            },
+            TokenType::None => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_token_correct_type(&self, token: &Token) -> bool {
+        match self {
+            TokenType::TypeFloat => match token.r#type {
+                TokenType::Float => true,
+                _ => false,
+            },
+            TokenType::TypeInt => match token.r#type {
+                TokenType::Integer => true,
+                _ => false,
+            },
+            TokenType::TypeString => match token.r#type {
+                TokenType::String => true,
+                _ => false,
+            },
+            TokenType::TypeBool => match token.r#type {
+                TokenType::True | TokenType::False => true,
+                _ => false,
+            },
+            TokenType::TypeFunction => match token.r#type {
+                TokenType::TypeFunction => true,
                 _ => false,
             },
             TokenType::None => true,
@@ -155,6 +185,7 @@ impl Display for TokenType {
             TokenType::TypeInt => "int",
             TokenType::TypeString => "string",
             TokenType::TypeBool => "bool",
+            TokenType::TypeFunction => "function",
             TokenType::And => "and",
             TokenType::Class => "class",
             TokenType::Else => "else",
@@ -176,8 +207,12 @@ impl Display for TokenType {
             TokenType::Error => "error",
             TokenType::Eof => "eof",
             TokenType::Newline => "newline",
+            TokenType::FloatNone => "none",
+            TokenType::IntegerNone => "none",
+            TokenType::StringNone => "none",
+            TokenType::BoolNone => "none",
+            TokenType::FunctionNone => "none",
             TokenType::Empty => "empty",
-            TokenType::TypeFunction => "function",
         };
         write!(f, "{}", token)
     }
@@ -198,6 +233,17 @@ impl Token {
             line,
         }
     }
+
+    pub fn type_of(&self) -> String {
+        match self.r#type {
+            TokenType::True => "bool".to_owned(),
+            TokenType::False => "bool".to_owned(),
+            TokenType::Float => "float".to_owned(),
+            TokenType::Integer => "int".to_owned(),
+            TokenType::String => "string".to_owned(),
+            _ => self.lexeme.clone(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -216,6 +262,12 @@ impl Scanner {
             line: 1,
             source,
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.start = 0;
+        self.current = 0;
+        self.line = 1;
     }
 
     pub fn scan_token(&mut self) -> Token {
